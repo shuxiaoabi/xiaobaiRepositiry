@@ -1,0 +1,226 @@
+package com.shu.hamal.canal.common;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import net.spy.memcached.MemcachedClient;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+/**
+ * 缓存管理，当更新数据库时，删除Memcached当中对应的缓存<br>
+ * 
+ * @author shuxiaobai
+ */
+public class MemcachedUtil {
+
+    private Logger logger = LoggerFactory.getLogger(MemcachedUtil.class);
+
+    private JdbcTemplate jdbcTemplate = null;
+
+    private MemcachedClient client = null;
+
+    private String memcachedIp;
+
+    private int memcachedPort;
+
+    private String memcachedTableName;
+
+    private String memcachedTableNameKeyfield;
+
+    private String memcachedTableNameValuefield;
+
+    /**
+     * @param jdbcTemplate
+     * @param memcachedIp
+     * @param memcachedPort
+     * @param memcachedTableName
+     * @param memcachedTableNameKeyfield
+     * @param memcachedTableNameValuefield
+     */
+   /* public MemcachedUtil(JdbcTemplate jdbcTemplate, String memcachedIp, String memcachedPort, String memcachedTableName,
+            String memcachedTableNameKeyfield, String memcachedTableNameValuefield) {
+        super();
+        this.jdbcTemplate = jdbcTemplate;
+        this.memcachedIp = memcachedIp;
+        this.memcachedPort = Integer.valueOf(memcachedPort);
+        this.memcachedTableName = memcachedTableName;
+        this.memcachedTableNameKeyfield = memcachedTableNameKeyfield;
+        this.memcachedTableNameValuefield = memcachedTableNameValuefield;
+        try {
+            this.client = new MemcachedClient(new InetSocketAddress(this.memcachedIp, this.memcachedPort));
+        } catch (IOException e) {
+            logger.error("缓存连接异常：" + e);
+        }
+    }
+*/
+    /**
+     * 
+     * 功能描述: 删除指定表对应的缓存<br>
+     * 
+     * @param tableName
+     */
+    public void deleteMemcached(String tableName) {
+        logger.debug("删除指定表对应的缓存，tableName=" + tableName);
+        // 获取表名对应的所有缓存命名空间
+        List<String> nameSpaces = findCachedNamespace(tableName);
+        if (nameSpaces.size() < 1)
+            return;
+        // 获取Memcached中所有的key
+        String[] keys = getAllKeys(memcachedIp, memcachedPort);
+        // logger.debug("Memcached中所有的键值：" + Arrays.toString(keys));
+        for (String namespace : nameSpaces) {
+            for (String key : keys) {
+                if (matchRule(namespace, key)) {
+                    logger.info("删除的缓存key为：" + key);
+                    client.delete(key);
+                }
+            }
+        }
+    }
+
+    /**
+     * 
+     * 功能描述: Memcached中缓存与命名空间的匹配规则<br>
+     * 
+     * @param nameSpaces
+     * @param key
+     * @return
+     */
+    public boolean matchRule(String nameSpaces, String key) {
+        // nameSpaces--FRSP_USER_GROUP key-- FRSP_USER_GROUP:402880a34b47de89014b495ef66c000a
+        nameSpaces = nameSpaces + ":";
+        if (key.contains(nameSpaces)) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 
+     * 功能描述: 获取缓存中所有的key<br>
+     * 
+     * @param host
+     * @param port
+     * @return
+     */
+    public String[] getAllKeys(String host, int port) {
+        Socket socket = null;
+        PrintWriter printWriter = null;
+        BufferedReader bufReader = null;
+
+        StringBuffer strBuffer = new StringBuffer();
+        try {
+            socket = new Socket(host, port);
+            printWriter = new PrintWriter(socket.getOutputStream());
+            bufReader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            printWriter.println("stats items");
+            printWriter.flush();
+            String l;
+            while (!(l = bufReader.readLine()).equals("END")) {
+                strBuffer.append(l).append("\n");
+            }
+            String rr = strBuffer.toString();
+            Set<String> ids = new HashSet<String>();
+            if (rr.length() > 0) {
+                strBuffer = new StringBuffer();// items
+                rr.replace("STAT items", "");
+                for (String s : rr.split("\n")) {
+                    ids.add(s.split(":")[1]);
+                }
+                if (ids.size() > 0) {
+                    strBuffer = new StringBuffer();
+                    for (String s : ids) {
+                        printWriter.println("stats cachedump " + s + " 0");
+                        printWriter.flush();
+                        while (!(l = bufReader.readLine()).equals("END")) {
+                            strBuffer.append(l.split(" ")[1]).append("\n");
+                        }
+                    }
+                }
+            }
+        } catch (UnknownHostException e) {
+            logger.error("socket连接异常：" + e.getMessage());
+        } catch (IOException e) {
+            logger.error("流读取异常：" + e.getMessage());
+        } finally {
+            try {
+                if (printWriter != null)
+                    printWriter.close();
+                if (bufReader != null)
+                    bufReader.close();
+                if (socket != null)
+                    socket.close();
+            } catch (IOException e) {
+                logger.error("流关闭异常：" + e.getMessage());
+            }
+        }
+        return strBuffer.toString().split("\n");
+    }
+
+    /**
+     * 
+     * 功能描述: 根据表面查询缓存中对应的命名空间<br>
+     * 
+     * @param tableName
+     * @return
+     */
+    public List<String> findCachedNamespace(String tableName) {
+        List<String> namespaceList = new ArrayList<String>();
+        if (null == jdbcTemplate)
+            return namespaceList;
+        String sql = "select * from " + memcachedTableName + " where " + memcachedTableNameKeyfield + "='" + tableName + "'";
+        logger.debug("查询缓存命名空间，sql=" + sql);
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(sql);
+        Iterator<Map<String, Object>> it = list.iterator();
+        while (it.hasNext()) {
+            Map<String, Object> result = (Map<String, Object>) it.next();
+            String namespace = (String) result.get(memcachedTableNameValuefield);
+            namespaceList.add(namespace);
+        }
+        return namespaceList;
+    }
+
+    public String telnet(String host, int port, String cmd) {
+        StringBuffer r = new StringBuffer();
+        try {
+            Socket socket = new Socket(host, port);
+            PrintWriter os = new PrintWriter(socket.getOutputStream());
+            BufferedReader is = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            os.println(cmd);
+            os.flush();
+            String l;
+            while (!(l = is.readLine()).equals("END")) {
+                r.append(l).append("\n");
+            }
+            os.close();
+            is.close();
+            socket.close();
+        } catch (Exception e) {
+            System.out.println("Error" + e);
+        }
+        return r.toString();
+    }
+
+    public static void main(String[] args) {
+        /*
+         * String[] keys = getAllKeys("localhost", 11211); Arrays.sort(keys); for (String s : keys) { System.out.println(s); }
+         * System.out.println(telnet("localhost", 11211, "stats")); String key = "FRSP_USER_TREE:USER_TREE_GRID"; client.delete(key);
+         */
+
+        // matchRule("frsp_user", "FRSP_USER_GROUP:402880a34b47de89014b495ef66c000a");
+    }
+}

@@ -1,0 +1,292 @@
+/*
+ * Copyright (C), 2013-2015, 江苏飞搏软件技术有限公司 FileName: CanalUtility.java Date:
+ * 2015年1月13日 上午8:58:42 History: //修改记录 <author> <time> <version> <desc>
+ * 修改人姓名 修改时间 版本号 描述
+ */
+package com.fable.hamal.canal.common;
+
+import java.io.UnsupportedEncodingException;
+import java.sql.Types;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.alibaba.otter.canal.protocol.CanalEntry.Column;
+import com.alibaba.otter.canal.protocol.CanalEntry.EventType;
+
+/**
+ * 工具类
+ * 
+ * @author 夷宏伟
+ */
+public class CanalUtility {
+
+    /** SQL文件前缀 */
+    public static final String CANAL_FILENAME_PREFIX = "_canal";
+    /** SQL文件后缀 */
+    public static final String CANAL_FILENAME_SUFFIX = ".log";
+
+    /** 生成的SQL文件存放路径 */
+    // public static final String CANAL_SQL_DIRECTORY = HamalPropertyConfigurer.getHamalProperty("canal.sql.directory").trim().replaceAll("\\\\", "\\"
+    // + File.separator).replaceAll("/", "\\" + File.separator);
+    /** 待同步的SQL文件存放路径 */
+    // public static final String CANAL_MONITOR_DIRECTORY =
+    // HamalPropertyConfigurer.getHamalProperty("canal.monitor.directory").trim().replaceAll("\\\\", "\\" + File.separator).replaceAll("/", "\\" +
+    // File.separator);
+
+    // public static final String CANAL_MONITOR_DATABASE =
+    // HamalPropertyConfigurer.getHamalProperty("jdbc.url").trim().substring(HamalPropertyConfigurer.getHamalProperty("jdbc.url").trim().lastIndexOf("/")
+    // + 1);
+
+    /** canal */
+    public static final String INET_SOCKET_ADDRESS = HamalPropertyConfigurer.getHamalProperty("inet.socket.address").trim();
+    public static final int INET_SOCKET_PORT = Integer.parseInt(HamalPropertyConfigurer.getHamalProperty("inet.socket.port").trim());
+    public static final String CANAL_DESTINATION = HamalPropertyConfigurer.getHamalProperty("canal.destination").trim();
+    public static final String CANAL_USERNAME = HamalPropertyConfigurer.getHamalProperty("canal.username").trim();
+    public static final String CANAL_PASSWORD = HamalPropertyConfigurer.getHamalProperty("canal.password").trim();
+
+    /** memcached */
+    // public static final String MEMCACHED_IP = HamalPropertyConfigurer.getHamalProperty("memcached.ip").trim();
+    // public static final int MEMCACHED_PORT = Integer.parseInt(HamalPropertyConfigurer.getHamalProperty("memcached.port").trim());
+    /** tableName--存储表名与缓存命名空间的映射 */
+    // public static final String MEMCACHED_TABLENAME = HamalPropertyConfigurer.getHamalProperty("memcached.tableName").trim();
+    /** tableName中记录表名的字段 */
+    // public static final String MEMCACHED_TABLENAME_KEYFIELD = HamalPropertyConfigurer.getHamalProperty("memcached.tableName.keyfield").trim();
+    /** tableName中记录缓存命名空间的字段 */
+    // public static final String MEMCACHED_TABLENAME_VALUEFIELD = HamalPropertyConfigurer.getHamalProperty("memcached.tableName.valuefield").trim();
+
+    /** 存放执行过的SQL语句 */
+    // public static Vector<String> vector = new Vector<String>();
+
+    /** SQL语句分隔符 */
+    public static final String minus = "----";
+
+    private static List<Column> list = new ArrayList<Column>();
+
+    private static Logger logger = LoggerFactory.getLogger(CanalUtility.class);
+
+    /**
+     * 
+     * 功能描述: 拼装SQL语句<br>
+     * 
+     * @param beforeColumns
+     * @param afterColumns
+     * @param tableName
+     * @param eventType
+     * @return
+     */
+    public static String constructSql(List<Column> beforeColumns, List<Column> afterColumns, String tableName, EventType eventType) {
+        StringBuffer sb = new StringBuffer();
+        if (eventType == EventType.INSERT) {
+            sb.append("insert into " + tableName + "(");
+            for (int i = 0; i < afterColumns.size(); i++) {
+                if (i != afterColumns.size() - 1) {
+                    sb.append(afterColumns.get(i).getName() + ", ");
+                } else {
+                    sb.append(afterColumns.get(i).getName() + ")");
+                }
+            }
+            sb.append(" values(");
+            for (int i = 0; i < afterColumns.size(); i++) {
+                if (i != afterColumns.size() - 1) {
+                    if (afterColumns.get(i).getIsNull()) {
+                        sb.append("NULL, ");
+                    } else {
+                        sb.append(getColumnValue(afterColumns.get(i)) + ", ");
+                    }
+                } else {
+                    if (afterColumns.get(i).getIsNull()) {
+                        sb.append("NULL)");
+                    } else {
+                        sb.append(getColumnValue(afterColumns.get(i)) + ")");
+                    }
+                }
+            }
+        } else if (eventType == EventType.DELETE) {
+            sb.append("delete from " + tableName + " where ");
+            list.clear();
+            // 遍历主键
+            for (Column column : beforeColumns) {
+                if (!column.getIsKey())
+                    continue;
+                else
+                    list.add(column);
+            }
+            if (list.size() == 0) {
+                for (Column column : beforeColumns) {
+                    list.add(column);
+                }
+            }
+            for (int i = 0; i < list.size(); i++) {
+                if (i != list.size() - 1) {
+                    if (list.get(i).getIsNull()) {
+                        sb.append(list.get(i).getName() + " is null and ");
+                    } else {
+
+                        sb.append(list.get(i).getName() + "=" + getColumnValue(list.get(i)) + " and ");
+                    }
+                } else {
+                    if (list.get(i).getIsNull()) {
+                        sb.append(list.get(i).getName() + " is null");
+                    } else {
+                        sb.append(list.get(i).getName() + "=" + getColumnValue(list.get(i)));
+                    }
+                }
+            }
+        } else {
+            sb.append("update " + tableName + " set ");
+            for (int i = 0; i < afterColumns.size(); i++) {
+                if (i != afterColumns.size() - 1) {
+                    if (afterColumns.get(i).getIsNull()) {
+                        sb.append(afterColumns.get(i).getName() + " = null, ");
+                    } else {
+                        sb.append(afterColumns.get(i).getName() + "=" + getColumnValue(afterColumns.get(i)) + ", ");
+                    }
+                } else {
+                    if (afterColumns.get(i).getIsNull()) {
+                        sb.append(afterColumns.get(i).getName() + " = null WHERE ");
+                    } else {
+                        sb.append(afterColumns.get(i).getName() + "=" + getColumnValue(afterColumns.get(i)) + " WHERE ");
+                    }
+                }
+            }
+
+            list.clear();
+            // 遍历主键
+            for (Column column : beforeColumns) {
+                if (!column.getIsKey())
+                    continue;
+                else
+                    list.add(column);
+            }
+            if (list.size() == 0) {
+                for (Column column : beforeColumns) {
+                    list.add(column);
+                }
+            }
+            for (int i = 0; i < list.size(); i++) {
+                if (i != list.size() - 1) {
+                    if (list.get(i).getIsNull()) {
+                        sb.append(list.get(i).getName() + " is null and ");
+                    } else {
+                        sb.append(list.get(i).getName() + "=" + getColumnValue(list.get(i)) + " and ");
+                    }
+                } else {
+                    if (list.get(i).getIsNull()) {
+                        sb.append(list.get(i).getName() + " is null");
+                    } else {
+                        sb.append(list.get(i).getName() + "=" + getColumnValue(list.get(i)));
+                    }
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 
+     * 功能描述:拼装canalSql语句 <br>
+     * 
+     * @param beforeColumns
+     * @param afterColumns
+     * @param tableName
+     * @param eventType
+     * @return
+     */
+    public static String constructCanalSql(List<Column> beforeColumns, List<Column> afterColumns, String tableName, EventType eventType) {
+        StringBuffer sb = new StringBuffer();
+        if (eventType == EventType.INSERT) {
+            sb.append("select * from " + tableName + " where ");
+            for (int i = 0; i < afterColumns.size(); i++) {
+                if (i != afterColumns.size() - 1) {
+                    if (afterColumns.get(i).getIsNull()) {
+                        sb.append(afterColumns.get(i).getName() + " is null and ");
+                    } else {
+                        sb.append(afterColumns.get(i).getName() + "=" + getColumnValue(afterColumns.get(i)) + " and ");
+                    }
+                } else {
+                    if (afterColumns.get(i).getIsNull()) {
+                        sb.append(afterColumns.get(i).getName() + " is null");
+                    } else {
+                        sb.append(afterColumns.get(i).getName() + "=" + getColumnValue(afterColumns.get(i)));
+                    }
+                }
+            }
+
+        } else if (eventType == EventType.DELETE) {
+            sb.append("select * from " + tableName + " where ");
+            for (int i = 0; i < beforeColumns.size(); i++) {
+                if (i != beforeColumns.size() - 1) {
+                    if (beforeColumns.get(i).getIsNull()) {
+                        sb.append(beforeColumns.get(i).getName() + " is null and ");
+                    } else {
+                        sb.append(beforeColumns.get(i).getName() + "=" + getColumnValue(beforeColumns.get(i)) + " and ");
+                    }
+                } else {
+                    if (beforeColumns.get(i).getIsNull()) {
+                        sb.append(beforeColumns.get(i).getName() + " is null");
+                    } else {
+                        sb.append(beforeColumns.get(i).getName() + "=" + getColumnValue(beforeColumns.get(i)));
+                    }
+                }
+            }
+        } else {
+            sb.append("select * from " + tableName + " where ");
+            for (int i = 0; i < afterColumns.size(); i++) {
+                if (i != afterColumns.size() - 1) {
+                    if (afterColumns.get(i).getIsNull()) {
+                        sb.append(afterColumns.get(i).getName() + " is null and ");
+                    } else {
+                        sb.append(afterColumns.get(i).getName() + "=" + getColumnValue(afterColumns.get(i)) + " and ");
+                    }
+                } else {
+                    if (afterColumns.get(i).getIsNull()) {
+                        sb.append(afterColumns.get(i).getName() + " is null");
+                    } else {
+                        sb.append(afterColumns.get(i).getName() + "=" + getColumnValue(afterColumns.get(i)));
+                    }
+                }
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 
+     * 功能描述: 获取Column的值<br>
+     * 
+     * @param column
+     * @return
+     */
+    private static String getColumnValue(Column column) {
+        if (column == null)
+            return null;
+        String value = null;
+        if (Types.BLOB == column.getSqlType()) { // 字段类型为BLOB
+            try {
+                byte[] byteArray = column.getValue().getBytes("ISO-8859-1");
+                // 转为16进制表示的字符串
+                String str = HexUtil.encodeHexStr(byteArray);
+                value = "X'" + str + "'";
+            } catch (UnsupportedEncodingException e) {
+                logger.error("字符串转字节数组异常：" + e.getMessage());
+            }
+        } else if (Types.VARCHAR == column.getSqlType() || Types.CHAR == column.getSqlType()) {
+            try {
+                String str = new String(column.getValue().getBytes(), "UTF-8");
+                // 转义value中的单引号，防止SQL异常
+                value = "'" + str.replace("\'", "\\\'") + "'";
+            } catch (UnsupportedEncodingException e) {
+                logger.error("字符串转字节数组异常：" + e.getMessage());
+            }
+
+        } else {// 字段类型为其他
+            // 转义value中的单引号，防止SQL异常
+            value = "'" + column.getValue().replace("\'", "\\\'") + "'";
+        }
+        // logger.debug(column.getName() + ":" + value);
+        return value;
+    }
+}

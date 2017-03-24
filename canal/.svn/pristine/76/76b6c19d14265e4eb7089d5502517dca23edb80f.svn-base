@@ -1,0 +1,30 @@
+####################################################
+#             canal configure properties           #
+####################################################
+
+#canal sql directory
+canal.sql.directory=c:/Users/Administrator/Desktop/test/in
+
+#monitor directory
+canal.monitor.directory=c:/Users/Administrator/Desktop/test/out
+
+#canal 
+inet.socket.address=127.0.0.1
+inet.socket.port=11111
+canal.destination=example
+canal.username=canal
+canal.password=canal
+
+#target database
+jdbc.driverClassName=com.mysql.jdbc.Driver
+jdbc.url=jdbc:mysql://127.0.0.1:3306/frsp
+jdbc.username=root
+jdbc.password=root123
+jdbc.dialect=org.hibernate.dialect.MySQLDialect
+
+#memcached
+memcached.ip=192.168.3.172
+memcached.port=11211
+memcached.tableName=frsp_dictionary
+memcached.tableName.keyfield=dict_id_desc
+memcached.tableName.valuefield=dict_value

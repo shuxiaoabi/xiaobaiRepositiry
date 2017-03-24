@@ -1,0 +1,21 @@
+/*
+ * Copyright (C), 2013-2014, 江苏飞搏软件技术有限公司 FileName: Start.java Date:
+ * 2014年8月5日 下午3:35:01 History: //修改记录 <author> <time> <version> <desc> 修改人姓名
+ * 修改时间 版本号 描述
+ */
+package com.fable.hamal.canal.start;
+
+import com.fable.hamal.canal.listener.CanalListener;
+import com.fable.hamal.canal.common.CanalContextHelper;
+
+/**
+ * start main daemon<br>
+ * 
+ * @author yihongwei
+ */
+public class Start {
+
+    public static void main(String[] args) {
+        ((CanalListener) CanalContextHelper.getBean("canalListener")).start();
+    }
+}

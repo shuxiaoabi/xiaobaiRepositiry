@@ -1,0 +1,192 @@
+package com.shu.hamal.canal.instance;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Vector;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import com.shu.hamal.canal.common.CanalUtility;
+import com.shu.hamal.canal.common.ConfigEntity;
+import com.shu.hamal.canal.common.FileIndexUtil;
+import com.shu.hamal.canal.common.InitConfig;
+import com.shu.hamal.canal.common.JdbcUtil;
+
+/**
+ * 
+ * 更新数据库线程<br>
+ * 
+ * @author shu.xiaobai
+ */
+public class CanalUpdate implements Runnable {
+
+    private Logger logger = LoggerFactory.getLogger(CanalUpdate.class);
+
+    private JdbcTemplate jdbcTemplate;
+
+    // private Vector<String> obj;
+
+    private ConfigEntity config;
+
+    public CanalUpdate(Vector<String> v, ConfigEntity config) {
+        // this.obj = v;
+        this.config = config;
+    }
+
+    public void run() {
+        // synchronized (obj) {
+        File canalFileDir = new File(config.getCanalMonitorDirectory());
+        logger.info("canal.monitor.directory - " + canalFileDir.getAbsolutePath());
+        if (!canalFileDir.exists()) {
+            logger.error("canal monitor directory not found！系统退出！(canal.properties配置文件中canal.monitor.directory目录不存在)");
+            System.exit(-1);
+        }
+        jdbcTemplate = new JdbcUtil().getJdbcTemplate(config.getJdbcDriverClassName(), config.getJdbcUrl(), config.getJdbcUsername(),
+                config.getJdbcPassword());
+        logger.info("canal update is running...");
+      /*  MemcachedUtil memcachedUtil = new MemcachedUtil(jdbcTemplate, config.getMemcachedIp(), config.getMemcachedPort(),
+                config.getMemcachedTableName(), config.getMemcachedTableNameKeyfield(), config.getMemcachedTableNameValuefield());*/
+        while (true) {
+            try {
+                String index = FileIndexUtil.readUpdateIndex(config.getUpdateFile());
+                String fileName = config.getJdbcName() + CanalUtility.CANAL_FILENAME_PREFIX + index + CanalUtility.CANAL_FILENAME_SUFFIX;
+                logger.info("等待读取文件" + fileName + "……");
+                File file = new File(config.getCanalMonitorDirectory() + File.separator + fileName);
+                while (!file.exists() || !file.canWrite() || !file.canRead() || !file.renameTo(file)) {
+                    logger.debug("等待读取文件" + fileName + "……");
+                    // if (obj.size() == 0) {
+                    // obj.wait();
+                    // }
+                    Thread.sleep(1000);
+                    // obj.clear();
+                    // obj.notify();
+                }
+
+                try {
+                    logger.info("start reading file: " + file.getCanonicalFile());
+                    String[] strings;
+                    while (true) {
+                        // BufferedReader br = new BufferedReader(new FileReader(file.getCanonicalPath()));
+                        BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(new File(file.getCanonicalPath())), "UTF-8"));
+                        String data = br.readLine();
+                        StringBuffer sb = new StringBuffer();
+                        while (data != null) {
+                            sb.append(data);
+                            data = br.readLine();
+                        }
+                        br.close();
+                        String canalString = sb.toString();
+                        strings = canalString.split(CanalUtility.minus);
+                        if (strings.length < 4) {
+                            logger.error("文件" + fileName + "不完整，解析异常！");
+                            logger.error("异常SQL:" + Arrays.toString(strings));
+                            Thread.sleep(100);
+                            continue;
+                            // System.exit(-1);
+                        } else {
+                            break;
+                        }
+                    }
+                    String databaseName = strings[0];
+                    String tableName = strings[1];
+                    String eventType = strings[2];
+                    String canalSql = strings[3];
+                    String sql = strings[4];
+
+                    boolean flag = true;
+                    try {
+                        logger.info("canal check: [" + canalSql + "]");
+                        flag = checkCanalUpdated(canalSql, eventType);
+                        if (!flag) {
+                            boolean isExecuted = false;
+                            int n = 0;
+                            while (!isExecuted && n < 5) {
+                                isExecuted = execute(databaseName, sql);
+                                n++;
+                            }
+                            if (n == 5) {
+                                logger.error("SQL语句[" + sql + "]执行异常，请检查SQL语句与数据库中表结构约束是否符合！系统退出！");
+                                System.exit(-1);
+                            } else {
+                                logger.info("SQL语句[" + sql + "]执行完成");
+                            }
+                           /* // 删除缓存
+                            memcachedUtil.deleteMemcached(tableName);*/
+                        } else {
+                            if ("DELETE".equals(eventType)) {
+                                logger.info("SQL语句[" + canalSql + "]执行结果为0，数据库" + databaseName + "中不存在该条记录，删除语句[" + sql + "]不执行");
+                            } else {
+                                logger.info("SQL语句[" + canalSql + "]执行结果为1，数据库" + databaseName + "中已存在该条记录，插入或更新语句[" + sql + "]不执行");
+                            }
+                        }
+                        file.delete();// 删除文件
+                        logger.info("刪除文件" + fileName);
+                        FileIndexUtil.updateIndex(index, config.getUpdateFile());// 更新文件序列号+1
+                    } catch (Exception e) {
+                        logger.error("database connection interrupt or sql error is found..........." + e);
+                        logger.error("请检查数据库连接信息是否正确或SQL语句是否拼写正确！系统退出！");
+                        System.exit(-1);
+                    }
+                } catch (Exception e) {
+                    logger.error("read file[" + fileName + "] exception..........." + e);
+                }
+            } catch (Exception e) {
+                logger.error("线程休眠或唤醒异常：" + e);
+            }
+        }
+        // }
+    }
+
+    private boolean execute(String databaseName, String sql) {
+        logger.debug("execute SQL：" + sql);
+        try {
+            jdbcTemplate.execute(sql);
+
+            // 将执行过的SQL语句存入vector
+            // CanalUtility.vector.add(sql);
+            InitConfig.listMap.get(databaseName).add(sql);
+
+            return true;
+        } catch (Exception e) {
+            logger.error("SQL语句执行异常：" + e);
+            String exceptionMsg = e.getMessage();
+            if (exceptionMsg.indexOf("Duplicate entry") > -1) {
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /**
+     * 
+     * 功能描述: 查看是否更新过数据<br>
+     * 
+     * @param canalSql
+     * @param eventType
+     * @return
+     */
+    private boolean checkCanalUpdated(String canalSql, String eventType) {
+        logger.debug("check SQL:" + canalSql);
+        List<Map<String, Object>> list = jdbcTemplate.queryForList(canalSql);
+        if ("DELETE".equals(eventType)) {
+            if (list.size() > 0) {
+                return false;
+            } else {
+                return true;
+            }
+        } else {
+            if (list.size() > 0) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+    }
+}

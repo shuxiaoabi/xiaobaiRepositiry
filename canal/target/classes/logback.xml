@@ -1,0 +1,156 @@
+<configuration scan="true" scanPeriod=" 5 seconds" debug="true">
+	<jmxConfigurator />
+	<appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+		<encoder>
+			<pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{56} - %msg%n
+			</pattern>
+		</encoder>
+	</appender>
+	
+	<appender name="CANAL-ROOT" class="ch.qos.logback.classic.sift.SiftingAppender">
+		<discriminator>
+			<Key>destination</Key>
+			<DefaultValue>canal</DefaultValue>
+		</discriminator>
+		<sift>
+			<appender name="FILE-${destination}" class="ch.qos.logback.core.rolling.RollingFileAppender">
+				<File>../logs/${destination}/${destination}.log</File>
+				<rollingPolicy
+					class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+					<!-- rollover daily -->
+					<fileNamePattern>../logs/${destination}/%d{yyyy-MM-dd}/${destination}-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
+					<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+						<!-- or whenever the file size reaches 100MB -->
+						<maxFileSize>512MB</maxFileSize>
+					</timeBasedFileNamingAndTriggeringPolicy>
+					<maxHistory>60</maxHistory>
+				</rollingPolicy>
+				<encoder>
+					<pattern>
+						%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{56} - %msg%n
+					</pattern>
+				</encoder>
+			</appender>
+		</sift>
+	</appender>
+	
+	<appender name="CANAL-META" class="ch.qos.logback.classic.sift.SiftingAppender">
+		<discriminator>
+			<Key>destination</Key>
+			<DefaultValue>canal</DefaultValue>
+		</discriminator>
+		<sift>
+			<appender name="META-FILE-${destination}" class="ch.qos.logback.core.rolling.RollingFileAppender">
+				<File>../logs/${destination}/meta.log</File>
+				<rollingPolicy
+					class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+					<!-- rollover daily -->
+					<fileNamePattern>../logs/${destination}/%d{yyyy-MM-dd}/meta-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
+					<timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+						<!-- or whenever the file size reaches 100MB -->
+						<maxFileSize>32MB</maxFileSize>
+					</timeBasedFileNamingAndTriggeringPolicy>
+					<maxHistory>60</maxHistory>
+				</rollingPolicy>
+				<encoder>
+					<pattern>
+						%d{yyyy-MM-dd HH:mm:ss.SSS} - %msg%n
+					</pattern>
+				</encoder>
+			</appender>
+		</sift>
+	</appender>
+  
+    <appender name="CANAL-CLIENT-SQL" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator>
+            <Key>destination</Key>
+            <DefaultValue>canal</DefaultValue>
+        </discriminator>
+        <sift>
+            <appender name="CANAL-CLIENT-SQL-FILE-${destination}" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <File>../logs/${destination}/canal_client_sql.log</File>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <!-- rollover daily -->
+                    <fileNamePattern>../logs/${destination}/%d{yyyy-MM-dd}/canal_client_sql-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
+                    <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                        <!-- or whenever the file size reaches 100MB -->
+                        <maxFileSize>512MB</maxFileSize>
+                    </timeBasedFileNamingAndTriggeringPolicy>
+                    <maxHistory>60</maxHistory>
+                </rollingPolicy>
+                <encoder>
+                    <pattern>
+                      %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{56} - %msg%n
+                    </pattern>
+                </encoder>
+            </appender>
+        </sift>
+    </appender>
+    
+    <appender name="CANAL-UPDATE-SQL" class="ch.qos.logback.classic.sift.SiftingAppender">
+        <discriminator>
+            <Key>destination</Key>
+            <DefaultValue>canal</DefaultValue>
+        </discriminator>
+        <sift>
+            <appender name="CANAL-UPDATE-SQL-FILE-${destination}" class="ch.qos.logback.core.rolling.RollingFileAppender">
+                <File>../logs/${destination}/canal_update_sql.log</File>
+                <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+                    <!-- rollover daily -->
+                    <fileNamePattern>../logs/${destination}/%d{yyyy-MM-dd}/canal_update_sql-%d{yyyy-MM-dd}-%i.log.gz</fileNamePattern>
+                    <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                        <!-- or whenever the file size reaches 100MB -->
+                        <maxFileSize>512MB</maxFileSize>
+                    </timeBasedFileNamingAndTriggeringPolicy>
+                    <maxHistory>60</maxHistory>
+                </rollingPolicy>
+                <encoder>
+                    <pattern>
+                      %d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{56} - %msg%n
+                    </pattern>
+                </encoder>
+            </appender>
+        </sift>
+    </appender>
+	<appender name="db-classic-mysql-pool" class="ch.qos.logback.classic.db.DBAppender">  
+        <connectionSource class="ch.qos.logback.core.db.DataSourceConnectionSource">  
+            <dataSource class="org.apache.commons.dbcp.BasicDataSource">  
+                <driverClassName>com.mysql.jdbc.Driver</driverClassName>  
+                <url>jdbc:mysql://localhost:3306/logbackdb</url>  
+                <username>root</username>  
+                <password>root</password> 
+            </dataSource>  
+        </connectionSource>  
+    </appender> 
+    <!-- 
+    <logger name="com.alibaba.otter.canal.instance" additivity="false">  
+        <level value="INFO" />  
+        <appender-ref ref="CANAL-ROOT" />
+    </logger>
+    <logger name="com.alibaba.otter.canal.deployer" additivity="false">  
+        <level value="INFO" />  
+        <appender-ref ref="CANAL-ROOT" />
+    </logger>
+    <logger name="com.alibaba.otter.canal.meta.FileMixedMetaManager" additivity="false">  
+        <level value="INFO" />  
+        <appender-ref ref="CANAL-META" />
+    </logger>
+    -->
+    <logger name="com.fable.hamal.canal.instance.CanalClient" additivity="false">  
+        <level value="DEBUG" />  
+        <appender-ref ref="CANAL-CLIENT-SQL" />
+        <appender-ref ref="db-classic-mysql-pool" />
+    </logger>
+    <logger name="com.fable.hamal.canal.instance.CanalUpdate" additivity="false">  
+        <level value="DEBUG" />  
+        <appender-ref ref="CANAL-UPDATE-SQL" />
+        <appender-ref ref="db-classic-mysql-pool" />
+    </logger>
+    
+	<root level="DEBUG">
+		 
+		<appender-ref ref="STDOUT"/>
+		
+		<appender-ref ref="CANAL-ROOT" />
+	</root>
+</configuration>

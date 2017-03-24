@@ -1,0 +1,180 @@
+package com.shu.hamal.canal.instance;
+
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.InetSocketAddress;
+import java.util.List;
+import java.util.Vector;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.alibaba.otter.canal.client.CanalConnector;
+import com.alibaba.otter.canal.client.CanalConnectors;
+import com.alibaba.otter.canal.protocol.CanalEntry.Entry;
+import com.alibaba.otter.canal.protocol.CanalEntry.EntryType;
+import com.alibaba.otter.canal.protocol.CanalEntry.EventType;
+import com.alibaba.otter.canal.protocol.CanalEntry.RowChange;
+import com.alibaba.otter.canal.protocol.CanalEntry.RowData;
+import com.alibaba.otter.canal.protocol.Message;
+import com.shu.hamal.canal.common.CanalUtility;
+import com.shu.hamal.canal.common.ConfigEntity;
+import com.shu.hamal.canal.common.FileIndexUtil;
+import com.shu.hamal.canal.common.InitConfig;
+
+/**
+ * 
+ * 生成SQL文件线程<br>
+ * 
+ * @author shu.xiaobai
+ */
+public class CanalClient implements Runnable {
+    private static final Logger LOGGER = LoggerFactory.getLogger(CanalClient.class);
+
+    // private Vector<String> obj;
+
+    public CanalClient(Vector<String> v) {
+        // this.obj = v;
+    }
+
+    public void run() {
+        // synchronized (obj) {
+        // 创建链接
+        CanalConnector connector = CanalConnectors.newSingleConnector(new InetSocketAddress(CanalUtility.INET_SOCKET_ADDRESS,
+                CanalUtility.INET_SOCKET_PORT), CanalUtility.CANAL_DESTINATION, CanalUtility.CANAL_USERNAME, CanalUtility.CANAL_PASSWORD);
+        int batchSize = 1000;
+        try {
+            long now = System.currentTimeMillis();
+            while (true) {
+                try {
+                    connector.connect();
+                    connector.subscribe(".*\\..*");
+                    connector.rollback();
+                    LOGGER.info("连接canal服务端成功...");
+                    break;
+                } catch (Exception e) {
+                    LOGGER.error("连接canal服务端失败...10s后尝试下一次连接...");
+                    Thread.sleep(10000);
+                }
+                if ((System.currentTimeMillis() - now) > 1000 * 60 * 10) {
+                    LOGGER.error("10min中内连接canal服务端失败...程序退出...请启动canal服务端后重启客户端...");
+                    System.exit(-1);
+                }
+            }
+            LOGGER.info("canal client is running...");
+            while (true) {
+                // if (obj.size() != 0) {
+                // obj.wait();
+                // }
+                Message message = connector.getWithoutAck(batchSize);
+                long batchId = message.getId();
+                int size = message.getEntries().size();
+                if (batchId == -1 || size == 0) {
+                    LOGGER.debug("canal client is running...");
+                    // obj.add(new String("canal"));
+                    // obj.notify();
+                    Thread.sleep(1000);
+                } else {
+                    try {
+                        printEntry(message.getEntries());
+                    } catch (Exception e) {
+                        LOGGER.error("PrintEntry Exception" + e);
+                    }
+                }
+                connector.ack(batchId);
+            }
+        } catch (Exception e) {
+            LOGGER.error("线程休眠或唤醒异常：" + e);
+        } finally {
+            connector.disconnect();
+        }
+        // }
+    }
+
+    private void printEntry(List<Entry> entrys) {
+        for (Entry entry : entrys) {
+            if (entry.getEntryType() == EntryType.TRANSACTIONBEGIN || entry.getEntryType() == EntryType.TRANSACTIONEND) {
+                continue;
+            }
+
+            RowChange rowChage = null;
+            try {
+                rowChage = RowChange.parseFrom(entry.getStoreValue());
+            } catch (Exception e) {
+                throw new RuntimeException("ERROR ## parser of eromanga-event has an error , data:" + entry.toString(), e);
+            }
+
+            for (RowData rowData : rowChage.getRowDatasList()) {
+                String sql = CanalUtility.constructSql(rowData.getBeforeColumnsList(), rowData.getAfterColumnsList(), entry.getHeader()
+                        .getTableName(), rowChage.getEventType());
+                String canalSql = CanalUtility.constructCanalSql(rowData.getBeforeColumnsList(), rowData.getAfterColumnsList(), entry.getHeader()
+                        .getTableName(), rowChage.getEventType());
+                // 将语句拼接写入文件
+                exportSql2File(canalSql, sql, rowChage.getEventType(), entry.getHeader().getTableName(), entry.getHeader().getSchemaName());
+            }
+        }
+    }
+
+    /**
+     * 导出sql到文件
+     * 
+     * @param sql
+     */
+    private void exportSql2File(String canalSql, String sql, EventType eventType, String tableName, String databaseName) {
+        ConfigEntity config = InitConfig.configMap.get(databaseName);
+        if (config != null) {
+
+            StringBuffer sb = new StringBuffer();
+            sb.append(databaseName);
+            sb.append(CanalUtility.minus);
+            sb.append(tableName);
+            sb.append(CanalUtility.minus);
+            sb.append(eventType);
+            sb.append(CanalUtility.minus);
+            sb.append(canalSql);
+            sb.append(CanalUtility.minus);
+            sb.append(sql);
+
+            if (InitConfig.listMap.get(databaseName).contains(sql)) {
+                InitConfig.listMap.get(databaseName).remove(sql);
+                return;
+            }
+
+            FileOutputStream fos = null;
+            File file = new File(config.getCanalSqlDirectory().replace("/", File.separator) + File.separator + databaseName
+                    + CanalUtility.CANAL_FILENAME_PREFIX + FileIndexUtil.readClientIndex(config.getClientFile()) + CanalUtility.CANAL_FILENAME_SUFFIX);
+            try {
+
+                if (file.exists()) {
+                    file.delete();
+                } else {
+                    file.getParentFile().mkdirs();
+                    file.createNewFile();
+                    file.setReadable(false);
+                }
+                fos = new FileOutputStream(file);
+                LOGGER.info("export [" + sb.toString() + "] to " + file.getCanonicalPath());
+                fos.write(sb.toString().getBytes("UTF-8"));
+                fos.flush();
+                file.setReadable(true);
+                LOGGER.info("SQL语句 [" + sb.toString() + "] 成功写至 " + file.getCanonicalPath());
+            } catch (FileNotFoundException e) {
+                LOGGER.error(file.getName() + "不存在：" + e);
+            } catch (UnsupportedEncodingException e) {
+                LOGGER.error("字符串转字节数组异常：" + e);
+            } catch (IOException e) {
+                LOGGER.error("字节写入文件" + file.getName() + "异常：" + e);
+            } finally {
+                if (null != fos)
+                    try {
+                        fos.close();
+                    } catch (IOException e) {
+                        LOGGER.error("流关闭异常：" + e);
+                    }
+            }
+        }
+    }
+}
